@@ -1,24 +1,27 @@
 #include <ctype.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 // Token
-enum {
-  TK_NUM = 256, // integer
-  TK_EOF,       // EOF
+typedef enum {
+  TK_RESERVED, // symbol
+  TK_NUM,      // integer
+  TK_EOF,      // EOF
+} TokenKind;
+
+typedef struct Token Token;
+
+struct Token {
+  TokenKind kind;
+  Token *next;
+  int val;
+  char *str;
 };
 
-typedef struct {
-  int ty;
-  int val;
-  char *input;
-} Token;
-
-char *user_input;
-
-Token tokens[100];
+Token *token;
 
 void error(char *fmt, ...) {
   va_list ap;
@@ -28,18 +31,44 @@ void error(char *fmt, ...) {
   exit(1);
 }
 
-void error_at(char *loc, char *msg) {
-  int pos = loc - user_input;
-  fprintf(stderr, "%s\n", user_input);
-  fprintf(stderr, "%*s", pos, "");
-  fprintf(stderr, "^ %s\n", msg);
-  exit(1);
+bool consume(char op) {
+  if (token->kind != TK_RESERVED || token->str[0] != op)
+    return false;
+  token = token->next;
+  return true;
 }
 
-void tokenize() {
-  char *p = user_input;
+void expect(char op) {
+  if (token->kind != TK_RESERVED || token->str[0] != op)
+    error("It is not '%c'", op);
+  token = token->next;
+}
 
-  int i = 0;
+int expect_number() {
+  if (token->kind != TK_NUM)
+    error("It is not number");
+  int val = token->val;
+  token = token->next;
+  return val;
+}
+
+bool at_eof() {
+  return token-> kind == TK_EOF;
+}
+
+Token *new_token(TokenKind kind, Token *cur, char *str) {
+  Token *tok = calloc(1, sizeof(Token));
+  tok->kind = kind;
+  tok->str = str;
+  cur->next = tok;
+  return tok;
+}
+
+void *tokenize(char *p) {
+  Token head;
+  head.next = NULL;
+  Token *cur = &head;
+
   while (*p) {
     if (isspace(*p)) {
       p++;
@@ -47,26 +76,21 @@ void tokenize() {
     }
 
     if (*p == '+' || *p == '-') {
-      tokens[i].ty = *p;
-      tokens[i].input = p;
-      i++;
-      p++;
+      cur = new_token(TK_RESERVED, cur, p++);
       continue;
     }
 
     if (isdigit(*p)) {
-      tokens[i].ty = TK_NUM;
-      tokens[i].input = p;
-      tokens[i].val = strtol(p, &p, 10);
-      i++;
+      cur = new_token(TK_NUM, cur, p);
+      cur->val = strtol(p, &p, 10);
       continue;
     }
 
-    error_at(p, "Cannnot tokenize");
+    error("Cannnot tokenize");
   }
 
-  tokens[i].ty = TK_EOF;
-  tokens[i].input = p;
+  new_token(TK_EOF, cur, p);
+  return head.next;
 }
 
 int main(int argc, char **argv) {
@@ -76,38 +100,22 @@ int main(int argc, char **argv) {
   }
 
   // tokenize
-  user_input = argv[1];
-  tokenize();
+  token = tokenize(argv[1]);
 
   printf(".intel_syntax noprefix\n");
   printf(".global main\n");
   printf("main:\n");
 
-  if (tokens[0].ty != TK_NUM)
-    error_at(tokens[0].input, "Not a number");
-  printf("  mov rax, %d\n", tokens[0].val);
+  printf("  mov rax, %d\n", expect_number());
 
-  int i = 1;
-  while (tokens[i].ty != TK_EOF) {
-    if  (tokens[i].ty == '+') {
-      i++;
-      if (tokens[i].ty != TK_NUM)
-        error_at(tokens[i].input, "Not a number");
-      printf("  add rax, %d\n", tokens[i].val);
-      i++;
+  while (!at_eof()) {
+    if  (consume('+')) {
+      printf("  add rax, %d\n", expect_number());
       continue;
     }
  
-    if  (tokens[i].ty == '-') {
-      i++;
-      if (tokens[i].ty != TK_NUM)
-        error_at(tokens[i].input, "Not a number");
-      printf("  sub rax, %d\n", tokens[i].val);
-      i++;
-      continue;
-    }
-
-    error_at(tokens[i].input, "Unexpected token");
+    expect('-');
+    printf("  sub rax, %d\n", expect_number());
   }
 
   printf("  ret\n");
